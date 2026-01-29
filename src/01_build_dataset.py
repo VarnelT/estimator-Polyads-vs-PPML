@@ -97,7 +97,7 @@ def load_and_prep():
     print(f"✅ Gravity chargée et corrigée : {len(df_grav)} paires.")
 
     # 5. CRÉATION DU SQUELETTE (Les Zéros)
-    print("💀 Création du Squelette (Injection des Zéros)...")
+    print("Création du Squelette (Injection des Zéros)...")
     
     unique_products = df_baci['k'].unique()
     valid_pairs = df_grav.dropna(subset=['gdp_o', 'gdp_d'])[['iso3_o', 'iso3_d']]
