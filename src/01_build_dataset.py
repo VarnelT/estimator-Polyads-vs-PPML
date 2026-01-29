@@ -75,10 +75,26 @@ def load_and_prep():
     df_grav = pd.read_csv(gravity_file)
     df_grav = df_grav[df_grav['year'] == 2015]
     
-    cols_grav = ['iso3_o', 'iso3_d', 'distw', 'rta', 'gdp_o', 'gdp_d', 'contig', 'comlang_off']
-    df_grav = df_grav[cols_grav]
+    # --- CORRECTION DES NOMS DE COLONNES ---
+    # On sélectionne les noms exacts que tu as trouvés
+    cols_grav_raw = ['iso3_o', 'iso3_d', 'distw_harmonic', 'fta_wto', 'gdp_o', 'gdp_d', 'contig', 'comlang_off']
     
-    print(f"✅ Gravity chargée : {len(df_grav)} paires.")
+    # On vérifie qu'elles sont toutes là (sécurité)
+    missing = [c for c in cols_grav_raw if c not in df_grav.columns]
+    if missing:
+        print(f"❌ ERREUR CRITIQUE : Il manque encore ces colonnes : {missing}")
+        return
+
+    # On ne garde que ça
+    df_grav = df_grav[cols_grav_raw]
+
+    # On renomme pour que ça matche avec la suite du script ('distw' et 'rta')
+    df_grav.rename(columns={
+        'distw_harmonic': 'distw',
+        'fta_wto': 'rta'
+    }, inplace=True)
+    
+    print(f"✅ Gravity chargée et corrigée : {len(df_grav)} paires.")
 
     # 5. CRÉATION DU SQUELETTE (Les Zéros)
     print("💀 Création du Squelette (Injection des Zéros)...")
