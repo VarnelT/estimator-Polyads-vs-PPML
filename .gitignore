@@ -1,0 +1,26 @@
+# --- DATA (CRUCIAL) ---
+# On ignore tous les dossiers de données et les gros fichiers
+data/
+*.csv
+*.csv.gz
+*.dta
+*.parquet
+*.zip
+*.rds
+*.RData
+
+# --- PYTHON ---
+# On ignore les fichiers compilés et les environnements virtuels
+__pycache__/
+*.pyc
+venv/
+polyads_env/
+.ipynb_checkpoints/
+.env
+
+# --- R ---
+.Rhistory
+.Rproj.user/
+
+# --- OS ---
+.DS_Store
