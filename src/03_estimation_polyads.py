@@ -1,10 +1,22 @@
+import os
+
+# --- 🛑 CORRECTIF ANTI-BLOCAGE (A mettre AVANT d'importer numpy) ---
+# On force Python à n'utiliser qu'un seul thread pour éviter les conflits
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+# -------------------------------------------------------------------
+
 import numpy as np
 import pandas as pd
 import time
 import sys
-import os
 from sklearn.preprocessing import LabelEncoder
-from tqdm import tqdm
+
+# On désactive tqdm pour voir les vrais logs (parfois la barre de chargement cache les erreurs)
+# from tqdm import tqdm 
 
 sys.path.append(os.getcwd())
 
@@ -14,130 +26,91 @@ except ImportError:
     try:
         from polyads.model import PolyadEstimator
     except ImportError:
-        print("❌ ERREUR IMPORT : Impossible de charger PolyadEstimator.")
+        print("❌ ERREUR IMPORT : PolyadEstimator introuvable.")
         sys.exit(1)
 
-# --- CONFIGURATION ---
-# On pointe vers le PANEL construit à l'étape précédente
-DATA_PATH = "estimator-Polyads-vs-PPML/data/processed/panel_total_trade.parquet"
+# --- CONFIGURATION TEST ATOMIQUE ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+DATA_PATH = os.path.join(project_root, "data", "processed", "panel_total_trade.parquet")
+
+# ON RESTE SUR LE TEST MINUSCULE POUR VALIDER
+TOP_N_COUNTRIES = 10 
 
 def run_estimation():
-    print("🚀 Chargement du PANEL (2005, 2010, 2015)...")
+    print("🚀 Démarrage du Test Polyads (Mode Monocoeur Sécurisé)...")
+    
     if not os.path.exists(DATA_PATH):
         print(f"❌ Fichier introuvable : {DATA_PATH}")
         return
 
+    # 1. Chargement & Nettoyage
     try:
         df = pd.read_parquet(DATA_PATH)
     except:
         df = pd.read_csv(DATA_PATH.replace('.parquet', '.csv'))
     
-    # 1. NETTOYAGE & PRÉPARATION
-    # On s'assure que tout est propre comme dans le PPML R
     df['rta'] = df['rta'].fillna(0).astype(int)
-    df['trade_flow'] = df['trade_flow'].fillna(0)
-    
-    # On garde les lignes valides (avec PIB et Distance dispos, même si Distance sert de filtre)
+    df['trade_flow'] = df['trade_flow'].fillna(0).astype(int)
     df = df.dropna(subset=['distw', 'gdp_o', 'gdp_d'])
-    
-    print(f"✅ Données Panel chargées : {len(df)} observations.")
 
-    # 2. ENCODAGE DES DIMENSIONS (i, j, t)
-    print("🛠 Encodage des dimensions (Pays, Année)...")
+    # 2. Filtre Drastique (Top 10)
+    print(f"✂️  Filtrage sur les {TOP_N_COUNTRIES} plus gros pays...")
+    total_trade = df.groupby('iso3_o')['trade_flow'].sum().sort_values(ascending=False)
+    top_countries = total_trade.head(TOP_N_COUNTRIES).index.tolist()
+    df = df[df['iso3_o'].isin(top_countries) & df['iso3_d'].isin(top_countries)].copy()
     
+    print(f"   -> Reste {len(df)} observations.")
+
+    # 3. Encodage
     le_pays = LabelEncoder()
-    # On apprend les codes sur l'ensemble des pays (Origine + Destination)
     all_countries = pd.concat([df['iso3_o'], df['iso3_d']]).unique()
     le_pays.fit(all_countries)
-    
     df['i'] = le_pays.transform(df['iso3_o'])
     df['j'] = le_pays.transform(df['iso3_d'])
     
     le_year = LabelEncoder()
     df['t'] = le_year.fit_transform(df['year'])
     
-    n_i = len(le_pays.classes_) # Nombre de pays
-    n_t = len(le_year.classes_) # Nombre d'années (3)
-    
-    print(f"   -> Cube Panel : {n_i} Pays x {n_i} Pays x {n_t} Années")
+    n_i = len(le_pays.classes_)
+    n_t = len(le_year.classes_)
 
-    # 3. CONSTRUCTION DU TENSEUR X
-    # CRUCIAL : En Panel structurel, les variables constantes (Distance, Langue) sautent !
-    # On ne garde que ce qui varie dans le temps : RTA.
-    print("📦 Construction du Tenseur 3D (Variable RTA uniquement)...")
-    
-    # Dimension 4 = 1 seule variable (RTA)
+    # 4. Tenseur X
+    print("📦 Construction Tenseur...")
     X_tensor = np.zeros((n_i, n_i, n_t, 1), dtype=np.float64)
-    
-    # Remplissage Vectorisé
-    indices_i = df['i'].values
-    indices_j = df['j'].values
-    indices_t = df['t'].values
-    
-    # On remplit avec le RTA
-    X_tensor[indices_i, indices_j, indices_t, 0] = df['rta'].values
-    
-    print(f"   -> Tenseur prêt. Taille : {X_tensor.nbytes / 1024**2:.2f} MB")
+    idx_i = df['i'].values.astype(int)
+    idx_j = df['j'].values.astype(int)
+    idx_t = df['t'].values.astype(int)
+    X_tensor[idx_i, idx_j, idx_t, 0] = df['rta'].values
 
-    # 4. CONFIGURATION DE L'ESTIMATEUR
-    beta_init = np.array([0.0]) # On cherche 1 seul coefficient (RTA)
+    # 5. Estimation
+    print("⏳ Lancement Optimisation (Cela peut prendre 10-20 sec pour compiler)...")
     
+    # On met use_tqdm=False pour éviter les bugs d'affichage
     estimator = PolyadEstimator(
-        max_iter=100,
-        tol=1e-6,
-        max_n_polyads=int(2e7), # On autorise beaucoup de polyads
-        use_tqdm=True
+        max_iter=10,
+        tol=1e-3, 
+        max_n_polyads=1000, 
+        use_tqdm=False 
     )
     
-    # 5. ESTIMATION
-    print("⏳ Démarrage de l'optimisation Polyads...")
     start_time = time.time()
     
     try:
         estimator.fit(
             df=df[['i', 'j', 't', 'trade_flow']],
-            indices=['i', 'j', 't'], # Dimensions Panel
+            indices=['i', 'j', 't'],
             values='trade_flow',
-            beta_init=beta_init,
+            beta_init=np.array([0.0]),
             X=X_tensor
         )
         
         duration = time.time() - start_time
-        print(f"✅ TERMINÉ en {duration:.2f} s")
-        
-        # 6. RÉSULTATS
-        beta_hat = estimator.beta_[0]
-        
-        # Erreur standard (si dispo)
-        se = np.nan
-        if hasattr(estimator, 'var_') and estimator.var_ is not None:
-             try:
-                se = np.sqrt(np.diag(estimator.var_))[0]
-             except: pass
-        
-        # Benchmark PPML (Calculé en R précédemment)
-        PPML_BENCHMARK = 0.1346 
-        
-        print("\n" + "="*50)
-        print("RÉSULTATS FINAUX : POLYADS PANEL vs PPML")
-        print("="*50)
-        
-        print(f"{'Variable':<10} | {'Coef Polyads':<15} | {'Std.Err':<10} | {'Cible PPML':<10}")
-        print("-" * 55)
-        print(f"{'RTA':<10} | {beta_hat:<15.5f} | {se:<10.4f} | {PPML_BENCHMARK:<10.4f}")
-        print("-" * 55)
-        
-        # Calcul de l'écart
-        diff = abs(beta_hat - PPML_BENCHMARK)
-        ecart_pct = (diff / PPML_BENCHMARK) * 100
-        
-        print(f"\n📊 DIAGNOSTIC :")
-        print(f"Écart avec le benchmark structurel : {diff:.5f} ({ecart_pct:.2f}%)")
-        
-        effect_pct = (np.exp(beta_hat) - 1) * 100
-        print(f"\n💡 INTERPRÉTATION ÉCO :")
-        print(f"Polyads estime que l'accord augmente le commerce de +{effect_pct:.2f}%")
-        print("(Contrôlé par effets fixes Paires, Origine-Temps, Destination-Temps)")
+        print("\n" + "="*40)
+        print(f"✅ SUCCÈS ! Le blocage est levé.")
+        print(f"Beta estimé : {estimator.beta_[0]:.5f}")
+        print(f"Temps       : {duration:.2f} s")
+        print("="*40)
 
     except Exception as e:
         print("\n❌ ERREUR :")
