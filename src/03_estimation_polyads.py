@@ -6,7 +6,6 @@ import os
 from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
-# On ajoute le chemin pour trouver le module polyads
 sys.path.append(os.getcwd())
 
 try:
@@ -15,23 +14,15 @@ except ImportError:
     try:
         from polyads.model import PolyadEstimator
     except ImportError:
-        print("❌ PolyadEstimator introuvable.")
+        print("❌ ERREUR IMPORT : Impossible de charger PolyadEstimator.")
         sys.exit(1)
 
 # --- CONFIGURATION ---
-# Chemin dynamique vers les données
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-DATA_PATH = os.path.join(project_root, "data", "processed", "panel_total_trade.parquet")
-
-# On garde le Top 40 pour la validation rapide
-# (Tu pourras passer à 80 ou plus une fois que ce script aura affiché un résultat)
-TOP_N_COUNTRIES = 40
+# On pointe vers le PANEL construit à l'étape précédente
+DATA_PATH = "data/processed/panel_total_trade.parquet"
 
 def run_estimation():
-    print("🚀 Démarrage de POLYADS (Version Propre & Rapide)...")
-    
-    # 1. CHARGEMENT
+    print("🚀 Chargement du PANEL (2005, 2010, 2015)...")
     if not os.path.exists(DATA_PATH):
         print(f"❌ Fichier introuvable : {DATA_PATH}")
         return
@@ -40,93 +31,131 @@ def run_estimation():
         df = pd.read_parquet(DATA_PATH)
     except:
         df = pd.read_csv(DATA_PATH.replace('.parquet', '.csv'))
+    
+    # =========================================================================
+    # 1. NETTOYAGE & SCALING (PARTIE MODIFIÉE)
+    # =========================================================================
+    
+    # Nettoyage RTA (0 ou 1)
+    df['rta'] = df['rta'].fillna(0).astype(int)
+    
+    # Filtre des données manquantes (PIB, Distance...)
+    df = df.dropna(subset=['distw', 'gdp_o', 'gdp_d', 'trade_flow'])
 
-    # Nettoyage de base
-    df = df.dropna(subset=['distw', 'gdp_o', 'gdp_d', 'trade_flow', 'rta'])
+    print("⚖️  Scaling des flux (Numerical Stability)...")
     
-    # 2. FILTRE TOP PAYS (Pour densifier le graphe)
-    print(f"✂️  Sélection des {TOP_N_COUNTRIES} plus gros commerçants...")
-    vol_par_pays = df.groupby('iso3_o')['trade_flow'].sum().sort_values(ascending=False)
-    top_pays = vol_par_pays.head(TOP_N_COUNTRIES).index.tolist()
+    # --- LA MODIFICATION EST ICI ---
+    # Division par 1 000 000 pour :
+    # 1. Éviter l'overflow des entiers 32-bit (Max ~2 Milliards)
+    # 2. Stabiliser les gradients de l'algorithme (éviter l'explosion)
+    df['trade_flow'] = (df['trade_flow'] / 1_000_000)
     
-    # On ne garde que les flux au sein de ce groupe
-    df = df[df['iso3_o'].isin(top_pays) & df['iso3_d'].isin(top_pays)].copy()
-    print(f"   -> Reste : {len(df)} observations.")
+    # Conversion stricte en int32 (Format obligatoire pour le C++ de Polyads)
+    df['trade_flow'] = df['trade_flow'].fillna(0).astype(np.int32)
+    
+    print(f"✅ Données chargées et scalées : {len(df)} observations.")
+    print(f"   -> Flux Max (en millions) : {df['trade_flow'].max()} (Safe < 2 Mrds)")
 
-    # 3. RENUMÉROTATION STRICTE & TYPAGE (C'est ce qui répare le bug)
-    print("🛠 Renumérotation des indices (0 à N-1)...")
+    # =========================================================================
+    # 2. ENCODAGE DES DIMENSIONS (i, j, t)
+    print("🛠 Encodage des dimensions (Pays, Année)...")
     
-    # Pays
     le_pays = LabelEncoder()
-    pays_presents = pd.concat([df['iso3_o'], df['iso3_d']]).unique()
-    le_pays.fit(pays_presents)
+    # On apprend les codes sur l'ensemble des pays (Origine + Destination)
+    all_countries = pd.concat([df['iso3_o'], df['iso3_d']]).unique()
+    le_pays.fit(all_countries)
     
-    df['i'] = le_pays.transform(df['iso3_o']).astype(np.int32)
-    df['j'] = le_pays.transform(df['iso3_d']).astype(np.int32)
+    df['i'] = le_pays.transform(df['iso3_o'])
+    df['j'] = le_pays.transform(df['iso3_d'])
     
-    # Temps
     le_year = LabelEncoder()
-    df['t'] = le_year.fit_transform(df['year']).astype(np.int32)
+    df['t'] = le_year.fit_transform(df['year'])
     
-    n_i = len(le_pays.classes_)
-    n_t = len(le_year.classes_)
+    n_i = len(le_pays.classes_) # Nombre de pays
+    n_t = len(le_year.classes_) # Nombre d'années (3)
     
-    print(f"   -> Dimensions : {n_i} x {n_i} x {n_t}")
+    print(f"   -> Cube Panel : {n_i} Pays x {n_i} Pays x {n_t} Années")
+
+    # 3. CONSTRUCTION DU TENSEUR X
+    # CRUCIAL : En Panel structurel, les variables constantes (Distance, Langue) sautent !
+    # On ne garde que ce qui varie dans le temps : RTA.
+    print("📦 Construction du Tenseur 3D (Variable RTA uniquement)...")
     
-    # Conversion flux en int32 (Vital pour le C++)
-    df['trade_flow'] = df['trade_flow'].astype(np.int32)
-    
-    # 4. TENSEUR X
-    print("📦 Construction du Tenseur X...")
+    # Dimension 4 = 1 seule variable (RTA)
     X_tensor = np.zeros((n_i, n_i, n_t, 1), dtype=np.float64)
     
-    idx_i = df['i'].values
-    idx_j = df['j'].values
-    idx_t = df['t'].values
+    # Remplissage Vectorisé
+    indices_i = df['i'].values
+    indices_j = df['j'].values
+    indices_t = df['t'].values
     
-    X_tensor[idx_i, idx_j, idx_t, 0] = df['rta'].values
+    # On remplit avec le RTA
+    X_tensor[indices_i, indices_j, indices_t, 0] = df['rta'].values
+    
+    print(f"   -> Tenseur prêt. Taille : {X_tensor.nbytes / 1024**2:.2f} MB")
 
-    # 5. LANCEMENT
-    print("⏳ Optimisation en cours...")
+    # 4. CONFIGURATION DE L'ESTIMATEUR
+    beta_init = np.array([0.0]) # On cherche 1 seul coefficient (RTA)
     
-    # On laisse tqdm (barre de chargement) activé cette fois
     estimator = PolyadEstimator(
         max_iter=100,
-        tol=1e-4,
-        max_n_polyads=100000, # On augmente un peu car c'est performant maintenant
+        tol=1e-6,
+        max_n_polyads=int(2e7), # On autorise beaucoup de polyads
         use_tqdm=True
     )
     
+    # 5. ESTIMATION
+    print("⏳ Démarrage de l'optimisation Polyads...")
     start_time = time.time()
     
     try:
         estimator.fit(
             df=df[['i', 'j', 't', 'trade_flow']],
-            indices=['i', 'j', 't'],
+            indices=['i', 'j', 't'], # Dimensions Panel
             values='trade_flow',
-            beta_init=np.array([0.0]),
+            beta_init=beta_init,
             X=X_tensor
         )
         
         duration = time.time() - start_time
+        print(f"✅ TERMINÉ en {duration:.2f} s")
         
         # 6. RÉSULTATS
-        beta_poly = estimator.beta_[0]
-        # Benchmark monde (pour info)
-        ppml_benchmark = 0.1346 
+        beta_hat = estimator.beta_[0]
+        
+        # Erreur standard (si dispo)
+        se = np.nan
+        if hasattr(estimator, 'var_') and estimator.var_ is not None:
+             try:
+                se = np.sqrt(np.diag(estimator.var_))[0]
+             except: pass
+        
+        # Benchmark PPML (Calculé en R précédemment)
+        PPML_BENCHMARK = 0.1346 
         
         print("\n" + "="*50)
-        print("✅ RÉSULTAT FINAL")
+        print("RÉSULTATS FINAUX : POLYADS PANEL vs PPML")
         print("="*50)
-        print(f"Polyads Beta (Top {TOP_N_COUNTRIES}) : {beta_poly:.5f}")
-        print(f"Benchmark PPML (Monde) : {ppml_benchmark:.5f}")
-        print(f"Temps de calcul        : {duration:.2f} s")
         
-        effect = (np.exp(beta_poly) - 1) * 100
-        print(f"\n💡 Effet estimé de l'accord : +{effect:.2f}%")
+        print(f"{'Variable':<10} | {'Coef Polyads':<15} | {'Std.Err':<10} | {'Cible PPML':<10}")
+        print("-" * 55)
+        print(f"{'RTA':<10} | {beta_hat:<15.5f} | {se:<10.4f} | {PPML_BENCHMARK:<10.4f}")
+        print("-" * 55)
+        
+        # Calcul de l'écart
+        diff = abs(beta_hat - PPML_BENCHMARK)
+        ecart_pct = (diff / PPML_BENCHMARK) * 100
+        
+        print(f"\n📊 DIAGNOSTIC :")
+        print(f"Écart avec le benchmark structurel : {diff:.5f} ({ecart_pct:.2f}%)")
+        
+        effect_pct = (np.exp(beta_hat) - 1) * 100
+        print(f"\n💡 INTERPRÉTATION ÉCO :")
+        print(f"Polyads estime que l'accord augmente le commerce de +{effect_pct:.2f}%")
+        print("(Contrôlé par effets fixes Paires, Origine-Temps, Destination-Temps)")
 
     except Exception as e:
-        print("\n❌ Erreur :")
+        print("\n❌ ERREUR :")
         print(e)
         import traceback
         traceback.print_exc()
