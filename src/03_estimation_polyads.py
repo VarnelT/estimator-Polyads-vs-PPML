@@ -100,7 +100,7 @@ def run_estimation():
     estimator = PolyadEstimator(
         max_iter=100,
         tol=1e-6,
-        max_n_polyads=int(2e7), # On autorise beaucoup de polyads
+        max_n_polyads=int(3e7), # On autorise beaucoup de polyads
         use_tqdm=True
     )
     
@@ -131,7 +131,7 @@ def run_estimation():
              except: pass
         
         # Benchmark PPML (Calculé en R précédemment)
-        PPML_BENCHMARK = 0.1346 
+        PPML_BENCHMARK = 0.134566 
         
         print("\n" + "="*50)
         print("RÉSULTATS FINAUX : POLYADS PANEL vs PPML")

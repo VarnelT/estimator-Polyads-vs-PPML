@@ -45,7 +45,7 @@ cat("   Formule : Flux ~ RTA | Paire + Exportateur-Année + Importateur-Année\n
 model_ppml_B <- fepois(
   trade_flow ~ rta | iso3_o^iso3_d + iso3_o^year + iso3_d^year,
   data = dt,
-  cluster = ~iso3_o + iso3_d # On cluster les erreurs standard par paire (robuste à l'autocorrélation)
+  cluster = ~iso3_o^iso3_d # On cluster les erreurs standard par paire (robuste à l'autocorrélation)
 )
 
 # --- 4. RÉSULTATS ---
