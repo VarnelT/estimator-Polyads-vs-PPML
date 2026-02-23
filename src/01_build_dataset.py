@@ -5,9 +5,9 @@ import glob
 
 # --- CONFIGURATION ---
 YEARS = [2005, 2010, 2015]  # Nos 3 années pivots
-BACI_PATH = "data/raw/baci_extracted"
-GRAVITY_PATH = "data/raw/gravity_extracted" 
-OUTPUT_PATH = "data/processed"
+BACI_PATH = "/home/onyxia/work/estimator-Polyads-vs-PPML/data/raw/baci_extracted"
+GRAVITY_PATH = "/home/onyxia/work/estimator-Polyads-vs-PPML/data/raw/gravity_extracted" 
+OUTPUT_PATH = "/home/onyxia/work/estimator-Polyads-vs-PPML/data/processed"
 
 os.makedirs(OUTPUT_PATH, exist_ok=True)
 
