@@ -1,62 +1,71 @@
-# --- INSTALLATION AUTOMATIQUE DES PACKAGES ---
-if(!require(fixest)) install.packages("fixest", repos="https://cloud.r-project.org")
-if(!require(arrow)) install.packages("arrow", repos="https://cloud.r-project.org")
-if(!require(data.table)) install.packages("data.table", repos="https://cloud.r-project.org")
-
 library(fixest)
 library(arrow)
 library(data.table)
 
-# --- 1. CHARGEMENT DES DONNÉES PANEL ---
-cat("🚀 Chargement des données Panel (2005, 2010, 2015)...\n")
-# Chemin vers ton nouveau fichier Panel
-data_path <- "estimator-Polyads-vs-PPML/data/processed/panel_total_trade.parquet"
+# --- 1. CONFIGURATION ET CHARGEMENT ---
 
-if (!file.exists(data_path)) {
-  stop("❌ ERREUR : Le fichier 'panel_total_trade.parquet' est introuvable. Lance d'abord le script 01 !")
+# Chemin d'accès relatif standardisé
+DATA_PATH <- "estimator-Polyads-vs-PPML/data/processed/panel_total_trade.parquet"
+
+# Fallback pour environnement local ou racine différente
+if (!file.exists(DATA_PATH)) {
+  DATA_PATH <- "data/processed/panel_total_trade.parquet"
 }
 
-dt <- read_parquet(data_path)
-setDT(dt) # Conversion en data.table pour la performance
+if (!file.exists(DATA_PATH)) {
+  stop("Erreur critique : Fichier de données introuvable. Veuillez exécuter le script 01 au préalable.")
+}
 
-cat("✅ Données chargées :", nrow(dt), "observations.\n")
+cat("Chargement du panel de données...\n")
+dt <- read_parquet(DATA_PATH)
+setDT(dt) # Conversion data.table
 
-# --- 2. PRÉPARATION ---
-# Nettoyage de base : On s'assure que le RTA est propre
-dt <- dt[!is.na(trade_flow) & !is.na(rta)]
+cat(sprintf("Observations chargées : %s\n", format(nrow(dt), big.mark = ",")))
 
-# NOTE IMPORTANTE SUR LE MODÈLE B :
-# Dans ce modèle structurel, on inclut des Effets Fixes Paires (ij).
-# Par définition, la DISTANCE, la LANGUE, la FRONTIÈRE ne changent pas dans le temps pour une paire.
-# Elles sont donc ABSORBÉES (colinéaires) par l'effet fixe. On ne les met pas dans la formule.
-# De même, le PIB est absorbé par les effets fixes temps-pays.
+# --- 2. DÉFINITION DU MODÈLE ---
 
-# --- 3. L'ESTIMATION PPML (Modèle Structurel "Three-Way") ---
-cat("🥊 Lancement du PPML Structurel (Modèle B)...\n")
-cat("   Formule : Flux ~ RTA | Paire + Exportateur-Année + Importateur-Année\n")
+# Identification des covariables disponibles
+# Le modèle inclut RTA par défaut, et 'diplo_disagreement' si disponible dans le parquet
+covariates <- c("rta")
+if ("diplo_disagreement" %in% names(dt)) {
+  covariates <- c(covariates, "diplo_disagreement")
+}
 
-# Syntaxe fixest :
-# trade_flow ~ rta      <- La variable d'intérêt
-# |                     <- Séparateur des effets fixes
-# iso3_o^iso3_d         <- Effet Fixe PAIRE (Absorbe la distance, l'histoire, etc.)
-# iso3_o^year           <- Effet Fixe Exportateur-Temps (Absorbe le PIB origine, l'offre, etc.)
-# iso3_d^year           <- Effet Fixe Importateur-Temps (Absorbe le PIB destination, la demande, etc.)
+# Construction dynamique de la formule
+# Structure : Y ~ X | Pair_FE + Exporter_Time_FE + Importer_Time_FE
+rhs_formula <- paste(covariates, collapse = " + ")
+fml_structurelle <- as.formula(paste(
+  "trade_flow ~", rhs_formula, "| iso3_o^iso3_d + iso3_o^year + iso3_d^year"
+))
 
-model_ppml_B <- fepois(
-  trade_flow ~ rta | iso3_o^iso3_d + iso3_o^year + iso3_d^year,
+cat("\n--- Spécification du Modèle ---\n")
+print(fml_structurelle)
+cat("Note : Les variables dyadiques invariantes (distance, frontières) sont absorbées par les effets fixes paires.\n")
+
+# --- 3. ESTIMATION (PPML) ---
+
+cat("\nExécution de l'estimation PPML (fepois)...\n")
+
+model_ppml <- fepois(
+  fml = fml_structurelle,
   data = dt,
-  cluster = ~iso3_o^iso3_d # On cluster les erreurs standard par paire (robuste à l'autocorrélation)
+  cluster = ~iso3_o^iso3_d # Clustering des erreurs standard au niveau de la paire
 )
 
-# --- 4. RÉSULTATS ---
-print(model_ppml_B)
+# --- 4. RÉSULTATS ET INTERPRÉTATION ---
 
-cat("\n📊 --- ANALYSE FINALE (BENCHMARK) ---\n")
-coeff_rta <- coef(model_ppml_B)["rta"]
-effect_pct <- (exp(coeff_rta) - 1) * 100
+cat("\n--- Résultats de l'estimation ---\n")
+print(model_ppml)
 
-cat(sprintf("Coefficient RTA (log-odds) : %.4f\n", coeff_rta))
-cat(sprintf("👉 IMPACT ÉCONOMIQUE ESTIMÉ : +%.2f%% de commerce grâce à l'accord.\n", effect_pct))
-cat("----------------------------------------------------------\n")
-cat("C'est CE chiffre précis que Polyads doit retrouver en utilisant\n")
-cat("la dimension temporelle (t) et les interactions tenseurs.\n")
+# Extraction et affichage de l'impact économique pour le RTA
+if ("rta" %in% names(coef(model_ppml))) {
+  beta_rta <- coef(model_ppml)["rta"]
+  se_rta <- se(model_ppml)["rta"]
+  effect_pct <- (exp(beta_rta) - 1) * 100
+  
+  cat("\n--- Analyse du coefficient RTA ---\n")
+  cat(sprintf("Coefficient (Beta) : %.4f (SE: %.4f)\n", beta_rta, se_rta))
+  cat(sprintf("Effet marginal estimé : +%.2f%% sur les flux commerciaux.\n", effect_pct))
+}
+
+cat("\nFin du script.\n")
