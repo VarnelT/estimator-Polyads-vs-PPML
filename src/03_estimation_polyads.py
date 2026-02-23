@@ -25,7 +25,7 @@ try:
 except ImportError as e:
     print(f"❌ ERREUR CRITIQUE : Impossible de charger PolyadEstimator.\n{e}")
     sys.exit(1)
-    
+
 # --- CONFIGURATION ---
 DATA_PATH = "/home/onyxia/work/estimator-Polyads-vs-PPML/data/processed/panel_total_trade.parquet"
 
@@ -162,8 +162,8 @@ def run_estimation():
         print("\n" + "="*65)
         print(f"{'RÉSULTATS FINAUX : POLYADS vs PPML (Benchmark)':^65}")
         print("="*65)
-        print(f"{'Variable':<20} | {'Polyads':<12} | {'SE':<10} | {'PPML (R)':<12} | {'Écart':<8}")
-        print("-" * 65)
+        print(f"{'Variable':<20} | {'Polyads':<12} | {'SE':<10} | {'PPML (R)':<12}")
+        print("-" * 75)
         
         for k, name in enumerate(features):
             b_poly = beta_hat[k]
@@ -176,7 +176,7 @@ def run_estimation():
             
             print(f"{name:<20} | {b_poly:<12.5f} | {se_poly:<10.4f} | {b_ppml:<12.5f} | {diff:<8.5f}")
 
-        print("-" * 65)
+        print("-" * 75)
         
         # Interprétation Rapide
         rta_idx = features.index('rta')

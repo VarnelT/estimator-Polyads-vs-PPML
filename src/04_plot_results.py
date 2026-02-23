@@ -1,97 +1,55 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ==========================================
-# 1. DONNÉES (À VERIFIER AVEC TES RESULTATS)
-# ==========================================
+# --- DONNÉES DES ESTIMATIONS (Vecteur de dimension 2) ---
+variables = ['Accord Commercial (RTA)', 'Désaccord Diplomatique']
 
-# A. PPML (Benchmark R fixest - Cluster Paire)
-beta_ppml = 0.13457
-se_ppml   = 0.03299
-ci_ppml   = 1.96 * se_ppml  # Marge d'erreur à 95%
+# PPML (Benchmark R - fixest)
+betas_ppml = [0.15354, 0.07560]
+ses_ppml = [0.03294, 0.02638]
+ci_ppml = [1.96 * s for s in ses_ppml]
 
-# B. POLYADS (Ton résultat Python)
-# (Mets ici les valeurs exactes de ton dernier run)
-beta_poly = 0.11700 
-se_poly   = 0.04700 
-ci_poly   = 1.96 * se_poly
+# Polyads (Résultats Python)
+betas_poly = [0.12209, 0.07572]
+ses_poly = [0.04660, 0.04370]
+ci_poly = [1.96 * s for s in ses_poly]
 
-# ==========================================
-# 2. CONFIGURATION DU GRAPHIQUE
-# ==========================================
-# On prépare les données pour l'axe Y (0 pour PPML, 1 pour Polyads)
-y_pos = [0, 1]
-betas = [beta_ppml, beta_poly]
-errors = [ci_ppml, ci_poly]
-labels = ['PPML (Benchmark)', 'Polyads (Notre Modèle)']
-colors = ['#1f77b4', '#ff7f0e'] # Bleu (Standard), Orange (Polyads)
+# --- CONFIGURATION DU GRAPHIQUE ---
+y_pos = np.arange(len(variables))
+offset = 0.15  # Décalage vertical pour séparer les deux modèles
 
-# Création de la figure
-fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+fig, ax = plt.subplots(figsize=(12, 7), dpi=300)
 
-# ==========================================
-# 3. ZONE DE CONSENSUS (Le Rectangle Vert)
-# ==========================================
-# On cherche l'intersection des deux intervalles de confiance
-low_overlap  = max(beta_ppml - ci_ppml, beta_poly - ci_poly)
-high_overlap = min(beta_ppml + ci_ppml, beta_poly + ci_poly)
+# Tracé des coefficients PPML (en bleu)
+ax.errorbar(x=betas_ppml, y=y_pos + offset, xerr=ci_ppml, 
+            fmt='o', markersize=10, capsize=6, linewidth=2, 
+            color='#1f77b4', label='PPML (Benchmark)', linestyle='None')
 
-# On dessine la zone verte
-if high_overlap > low_overlap:
-    ax.axvspan(low_overlap, high_overlap, color='green', alpha=0.1, label='Zone de Consensus')
-    # Lignes pointillées verticales pour délimiter la zone
-    ax.axvline(low_overlap, color='green', linestyle=':', alpha=0.3)
-    ax.axvline(high_overlap, color='green', linestyle=':', alpha=0.3)
+# Tracé des coefficients Polyads (en orange)
+ax.errorbar(x=betas_poly, y=y_pos - offset, xerr=ci_poly, 
+            fmt='s', markersize=10, capsize=6, linewidth=2, 
+            color='#ff7f0e', label='Polyads (Notre Modèle)', linestyle='None')
 
-# ==========================================
-# 4. TRACÉ DES ESTIMATEURS (ERROR BARS)
-# ==========================================
-for i in range(2):
-    # Barre d'erreur
-    ax.errorbar(x=betas[i], y=y_pos[i], xerr=errors[i], 
-                fmt='o',             # 'o' pour un gros point
-                markersize=12,       # Taille du point
-                capsize=8,           # Taille des "chapeaux" aux bouts de la barre
-                linewidth=2,         # Epaisseur du trait
-                color=colors[i],     # Couleur
-                label=labels[i])     # Pour la légende
-    
-    # Annotation du texte (Valeur de Beta) au-dessus du point
-    # On décale le texte un peu vers le haut (+0.15)
-    ax.text(x=betas[i], y=y_pos[i] + 0.15, s=f"β = {betas[i]:.3f}",
-            ha='center', va='bottom', 
-            fontsize=12, fontweight='bold', color=colors[i])
+# Ajout des valeurs numériques au-dessus/en-dessous des points
+for i in range(len(variables)):
+    # Valeurs PPML
+    ax.text(betas_ppml[i], y_pos[i] + offset + 0.08, f"β = {betas_ppml[i]:.4f}", 
+            ha='center', va='bottom', fontsize=10, fontweight='bold', color='#1f77b4')
+    # Valeurs Polyads
+    ax.text(betas_poly[i], y_pos[i] - offset - 0.22, f"β = {betas_poly[i]:.4f}", 
+            ha='center', va='bottom', fontsize=10, fontweight='bold', color='#ff7f0e')
 
-# ==========================================
-# 5. ESTHÉTIQUE ET FINITIONS
-# ==========================================
+# --- ESTHÉTIQUE ET FINITIONS ---
+ax.axvline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.4) # Ligne de l'effet nul
+ax.grid(axis='x', linestyle='--', alpha=0.5)
 
-# Ligne du Zéro (Effet Nul)
-ax.axvline(0, color='gray', linestyle='-.', linewidth=1.5, alpha=0.5)
-
-# Grille verticale légère
-ax.grid(axis='x', linestyle=':', alpha=0.6)
-
-# Axe Y : On met les noms des modèles
 ax.set_yticks(y_pos)
-ax.set_yticklabels(labels, fontsize=12)
+ax.set_yticklabels(variables, fontsize=12, fontweight='bold')
+ax.set_xlabel("Coefficient estimé (Intervalles de confiance à 95%)", fontsize=12)
+ax.set_title("Comparaison des Estimateurs : RTA et Diplomatie", fontsize=14, pad=20)
+ax.set_xlim(-0.05, 0.25) # Ajustement de l'axe pour la visibilité
 
-# Axe X : Titre et limites
-ax.set_xlabel("Effet Estimé de l'Accord Commercial (RTA)", fontsize=13)
-# On fixe les limites pour que ce soit joli (un peu de marge à gauche et à droite)
-ax.set_xlim(-0.02, 0.25)
+ax.legend(loc='upper right', fontsize=11, frameon=True)
 
-# Titre global (Optionnel, sinon tu le mets dans LaTeX)
-# ax.set_title("Comparaison des Estimateurs : Robustesse Structurelle", fontsize=14)
-
-# Légende en bas à gauche
-ax.legend(loc='lower left', fontsize=10, frameon=True)
-
-# Mise en page serrée
 plt.tight_layout()
-
-# Sauvegarde
-output_file = "graphique_final_polyads.png"
-plt.savefig(output_file)
-print(f"✅ Graphique généré : {output_file}")
-plt.show()
+plt.savefig("/home/onyxia/work/estimator-Polyads-vs-PPML/src/graphique_final_multivarie.png")
