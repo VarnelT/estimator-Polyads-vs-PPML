@@ -1,6 +1,9 @@
 # --- DATA (CRUCIAL) ---
 # On ignore tous les dossiers de données et les gros fichiers
 data/
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
 *.csv
 *.csv.gz
 *.dta

@@ -52,4 +52,4 @@ ax.set_xlim(-0.05, 0.25) # Ajustement de l'axe pour la visibilité
 ax.legend(loc='upper right', fontsize=11, frameon=True)
 
 plt.tight_layout()
-plt.savefig("/home/onyxia/work/estimator-Polyads-vs-PPML/src/graphique_final_multivarie.png")
+plt.savefig("/home/onyxia/work/estimator-Polyads-vs-PPML/results/graphique_final_multivarie.png")
