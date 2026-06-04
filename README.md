@@ -55,19 +55,25 @@ cd estimator-Polyads-vs-PPML
 #    Instructions: see data/README.md
 
 # 3. Install Python dependencies
-pip install -r requirements.txt
+pip install pandas numpy scikit-learn matplotlib
 
-# 4. Build the sparse gravity dataset
-python src/preparation/merge_and_inject_zeros.py
+# 4. Build the sparse gravity dataset (merge BACI + Gravity, inject zero-flows)
+python src/01_build_dataset.py
 
-# 5. Run Polyads estimation (Python)
-python src/estimation/run_polyads.py
+# 5. Run the PPML benchmark (R)
+Rscript src/02_benchmark_ppml.R
 
-# 6. Run PPML benchmark (R)
-Rscript src/estimation/run_ppml.R
+# 6. Run the Polyads estimation (Python)
+python src/03_estimation_polyads.py
+
+# 7. Generate the coefficient comparison plot
+python src/04_plot_results.py
+
+# 8. Generate the computational complexity table
+python src/05_generate_complexity_table.py
 ```
 
-Results are written to `results/` as CSV tables and PNG coefficient plots.
+Results are written to `results/` as PNG coefficient plots and complexity tables.
 
 ## References
 
